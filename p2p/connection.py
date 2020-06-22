@@ -3,20 +3,7 @@ import pickle
 import socket
 import threading
 
-header_name = "HEADER:"
-
-
-def split_header(header):
-    values = {}
-
-    parts = header.split("&")
-    for part in parts:
-        key, value = part.split("=")
-        values[key] = value
-
-    values["size"] = int(values["size"])
-
-    return values
+from .utils import header_name, split_header
 
 
 class Connection():
@@ -28,7 +15,7 @@ class Connection():
         self.buffer_size = int(buffer_size)
 
         self.terminate_flag = threading.Event()
-        self.thread = threading.Thread(target=self.main_loop)
+        self.thread = threading.Thread(target=self._listen)
         self.thread.deamon = True
         self.thread.start()
 
@@ -57,7 +44,7 @@ class Connection():
     def close(self):
         self.terminate_flag.set()
 
-    def main_loop(self):
+    def _listen(self):
         self.sock.settimeout(self.main_peer.timeout)
 
         while not self.terminate_flag.is_set():
@@ -65,6 +52,7 @@ class Connection():
                 # will block until header is received or socket timeout
                 header = self.sock.recv(2 ** 10).decode("utf-8")
             except socket.timeout:
+                # no header received within timeout seconds
                 continue
 
             if header.startswith(header_name):
