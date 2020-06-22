@@ -21,15 +21,15 @@ def split_header(header):
 
 class Connection():
 
-    def __init__(self, main_peer, target_peer, sock: socket.socket, buffer_size: int = 2 ** 13):
+    def __init__(self, main_peer, sock: socket.socket, buffer_size: int = 2 ** 13):
         self.main_peer = main_peer
-        self.target_peer = target_peer
         self.sock = sock
 
         self.buffer_size = int(buffer_size)
 
         self.terminate_flag = threading.Event()
         self.thread = threading.Thread(target=self.main_loop)
+        self.thread.deamon = True
         self.thread.start()
 
     def send(self, data):
@@ -58,7 +58,7 @@ class Connection():
         self.terminate_flag.set()
 
     def main_loop(self):
-        self.sock.settimeout(5)
+        self.sock.settimeout(self.main_peer.timeout)
 
         while not self.terminate_flag.is_set():
             try:
