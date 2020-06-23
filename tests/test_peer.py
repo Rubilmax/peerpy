@@ -24,13 +24,13 @@ def with_peers(peers_args: List[Dict[str, Any]]):
 
 
 @with_peers([{}])
-def test_stop(peers):
+def test_stop(peers: List[Dict[str, Any]]):
     """Tests the instanciation and asynchronous stop a peer object"""
     assert peers[0].server_thread.is_alive()
 
 
 @with_peers([{}, {}])
-def test_connect(peers):
+def test_connect(peers: List[Dict[str, Any]]):
     """Tests the connection of a peer to another"""
     peers[0].connect(peers[1].address)
 
@@ -38,26 +38,26 @@ def test_connect(peers):
 
 
 @with_peers([{}, {}, {}])
-def test_ping(peers):
+def test_ping(peers: List[Dict[str, Any]]):
     """Tests the discovery protocol on a network of 3 peers"""
     assert sorted(peers[0].get_local_peers()) == sorted([peer.address_name for peer in peers[1:]])
 
 
 @with_peers([{} for _ in range(10)])
-def test_ping_large_network(peers):
+def test_ping_large_network(peers: List[Dict[str, Any]]):
     """Tests the discovery protocol on a relatively large network"""
     assert sorted(peers[0].get_local_peers()) == sorted([peer.address_name for peer in peers[1:]])
 
 
 @with_peers([{}, {}, {"invisible": True}])
-def test_invisibility(peers):
+def test_invisibility(peers: List[Dict[str, Any]]):
     """Tests the invisibility argument at peer instanciation"""
     assert peers[0].get_local_peers() == [peers[1].address_name]
     assert peers[2].invisible
 
 
 @with_peers([{}, {}, {}])
-def test_invisibility_property(peers):
+def test_invisibility_property(peers: List[Dict[str, Any]]):
     """Tests the invisibility property when a peer is already running"""
     peers[2].invisible = True
     peers[2].invisible = False
