@@ -1,44 +1,71 @@
-import sys
 import time
-import pytest
-import logging
+from typing import List, Dict, Any
 
 from p2p import Peer
 
 
-def test_stop():
-    peer = Peer(timeout=1)
+def with_peers(peers_args: List[Dict[str, Any]]):
+    """Decorator used to instanciate, start and asynchronously stop peers during tests.
 
-    time.sleep(.5)
+    Args:
+        peers_args (List[Dict[str, Any]]): the list of peer kwargs to instanciate peers with.
+    """
+    def decorator(test_func):
+        def wrapper():
+            peers = [Peer(**peer_args, timeout=1) for peer_args in peers_args]
+            time.sleep(.5)
 
-    peer.stop(_async=True)
+            test_func(peers)
 
-
-def test_connect():
-    peer1 = Peer(port=15551, timeout=1)
-    peer2 = Peer(port=15552, timeout=1)
-
-    time.sleep(.5)
-
-    peer1.connect(peer2.address)
-
-    time.sleep(.5)
-
-    peer1.stop(_async=True)
-    peer2.stop(_async=True)
+            for peer in peers:
+                peer.stop(_async=True)
+        return wrapper
+    return decorator
 
 
-def test_ping():
-    peer1 = Peer(port=15551, timeout=1)
-    peer2 = Peer(port=15552, timeout=1)
-    peer3 = Peer(port=15553, timeout=1)
+@with_peers([{}])
+def test_stop(peers):
+    """Tests the instanciation and asynchronous stop a peer object"""
+    assert peers[0].server_thread.is_alive()
 
-    time.sleep(.5)
 
-    assert sorted(peer1.get_local_peers()) == sorted([peer2.address_name, peer3.address_name])
+@with_peers([{}, {}])
+def test_connect(peers):
+    """Tests the connection of a peer to another"""
+    peers[0].connect(peers[1].address)
 
-    time.sleep(.5)
+    assert peers[1].address_name in peers[0].connections
 
-    peer1.stop()
-    peer2.stop()
-    peer3.stop()
+
+@with_peers([{}, {}, {}])
+def test_ping(peers):
+    """Tests the discovery protocol on a network of 3 peers"""
+    assert sorted(peers[0].get_local_peers()) == sorted([peer.address_name for peer in peers[1:]])
+
+
+@with_peers([{} for _ in range(10)])
+def test_ping_large_network(peers):
+    """Tests the discovery protocol on a relatively large network"""
+    assert sorted(peers[0].get_local_peers()) == sorted([peer.address_name for peer in peers[1:]])
+
+
+@with_peers([{}, {}, {"invisible": True}])
+def test_invisibility(peers):
+    """Tests the invisibility argument at peer instanciation"""
+    assert peers[0].get_local_peers() == [peers[1].address_name]
+    assert peers[2].invisible
+
+
+@with_peers([{}, {}, {}])
+def test_invisibility_property(peers):
+    """Tests the invisibility property when a peer is already running"""
+    peers[2].invisible = True
+    peers[2].invisible = False
+    assert sorted(peers[0].get_local_peers()) == sorted([peers[1].address_name, peers[2].address_name])
+
+    peers[2].invisible = True
+    assert peers[0].get_local_peers() == [peers[1].address_name]
+
+    time.sleep(1)
+
+    assert not peers[2].pinger_thread.is_alive()

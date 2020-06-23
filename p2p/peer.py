@@ -12,7 +12,7 @@ from .connection import Connection
 
 class Peer():
 
-    def __init__(self, address: str = None, port: int = 0, timeout: int = 5):
+    def __init__(self, address: str = None, port: int = 0, timeout: int = 5, invisible: bool = False):
         if address is None:
             address = get_local_ip()
         elif ":" in address:
@@ -25,15 +25,14 @@ class Peer():
         self.connections = {}
         self.logger = logging.getLogger(f"[{self.address_name}]")
 
-        self.terminate_flag = threading.Event()
-
+        self.stop_server_flag = threading.Event()
         self.server_thread = threading.Thread(target=self._listen_offers)
         self.server_thread.deamon = True
         self.server_thread.start()
 
         self.pinger_thread = threading.Thread(target=self._listen_pings)
         self.pinger_thread.deamon = True
-        self.pinger_thread.start()
+        self.invisible = invisible  # needs to be the last because checks the pinger_thread state
 
     @property
     def address(self):
@@ -46,6 +45,17 @@ class Peer():
     @property
     def timeout(self):
         return self.server.gettimeout()
+
+    @property
+    def invisible(self):
+        return self._invisible
+
+    @invisible.setter
+    def invisible(self, invisible):
+        self._invisible = invisible
+
+        if not invisible and not self.pinger_thread.is_alive():
+            self.pinger_thread.start()
 
     def connect(self, address: str, port: int = None) -> Connection:
         if isinstance(address, str):
@@ -109,7 +119,7 @@ class Peer():
             connection.send(data)
 
     def stop(self, _async=False):
-        self.terminate_flag.set()
+        self.stop_server_flag.set()
 
         for connection in self.connections.values():
             connection.close()
@@ -118,15 +128,17 @@ class Peer():
             for connection in self.connections.values():
                 connection.thread.join()
 
-            self.server_thread.join()
-            self.pinger_thread.join()
+            if self.server_thread.is_alive():
+                self.server_thread.join()
+            if self.pinger_thread.is_alive():
+                self.pinger_thread.join()
 
     def _listen_offers(self):
         self.server.listen()
 
         self.logger.info(f"Listening for connections...")
 
-        while not self.terminate_flag.is_set():
+        while not self.stop_server_flag.is_set():
             try:
                 # will block until offer received AND accepted or socket timeout
                 sock, peer_address = self.server.accept()
@@ -153,13 +165,13 @@ class Peer():
 
             self.logger.debug("Pinger waiting for pings...")
 
-            while not self.terminate_flag.is_set():
+            while not self.stop_server_flag.is_set() and not self.invisible:
                 try:
                     data = pinger.recv(512).decode("utf-8")
                 except socket.timeout:
                     continue
 
-                if "PING" in data:
+                if "PING" in data and not self.invisible:  # in case this peer's visibility changed within the timeout window
                     address_name = data.split(" ")[1]
 
                     self.logger.debug(f"Received ping from {address_name}!")
