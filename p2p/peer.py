@@ -8,8 +8,8 @@ import threading
 
 from typing import Tuple, List, Any
 
-from .utils import hello_header, header_max_size, build_header, split_header, get_local_ip, check_address
 from .connection import Connection
+from .utils import hello_header, header_max_size, build_hello_header, split_header, get_local_ip, check_address, default_buffer_size
 
 
 class Peer():
@@ -95,7 +95,7 @@ class Peer():
         if not invisible and not self.pinger_thread.is_alive():
             self.pinger_thread.start()
 
-    def connect(self, address: str, port: int = None, buffer_size: int = 2 ** 13, data_type: str = "raw", strict: bool = True) -> Connection:
+    def connect(self, address: str, port: int = None, buffer_size: int = default_buffer_size, data_type: str = "raw", strict: bool = True) -> Connection:
         """Attempts to start a connection with a remote peer located at (address, port).
         Additional arguments are passed to the Connection constructor and sent to the remote peer right after successful
         connection, so that it knows with what data type to communicate with.
@@ -103,7 +103,7 @@ class Peer():
         Args:
             address (str): the ipv4 address of the remote peer, provided with the port if wanted (ipv4:port)
             port (int, optional): the port to use for the connection, if not provided in address. Defaults to None.
-            buffer_size (int, optional): the buffer size to use. Defaults to 2**13.
+            buffer_size (int, optional): the buffer size to use to receive data. Defaults to p2p.utils.default_buffer_size.
             data_type (str, optional): the data type to use for the connection. Defaults to "raw".
             strict (bool, optional): whether this connection is strict on data types. Defaults to True.
 
@@ -118,15 +118,14 @@ class Peer():
             # TODO: use create_connection for ipv4 + ipv6 ??
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.timeout)
-            sock.connect(address)
 
-            # header to send data about this peer and the data type used during this connection
-            header = build_header({
-                "peer_name": self.address_name,
-                "buffer_size": buffer_size,
-                "data_type": data_type
-            }).encode("utf-8")
-            sock.send(header)
+            try:
+                sock.connect(address)
+            except socket.timeout:
+                return False
+
+            header = build_hello_header(self.address_name, data_type)
+            sock.sendall(header.encode("utf-8"))
 
             self.connections[address_name] = Connection(
                 self,
@@ -137,7 +136,7 @@ class Peer():
             )
             self.logger.debug(f"Connection established with [{address_name}]")
 
-        return self.connections.get(address_name, None)
+        return self.connections.get(address_name, False)
 
     def get_local_peers(self) -> List[str]:
         """Returns the list of peers visible on the same local network.
@@ -205,11 +204,14 @@ class Peer():
     def _listen_offers(self):
         """Starts this peer's server, used to listen for connection requests."""
 
-        # TODO: make self.max_connections dynamic
-        self.server.listen(listen=self.max_connections)
+        self.server.listen()
         self.logger.info(f"Listening for connections...")
 
         while not self.stop_server_flag.is_set():
+            if len(self.connections) >= self.max_connections > 0:
+                time.sleep(1)
+                continue
+
             try:
                 # will block until offer received AND accepted or socket timeout
                 sock, peer_address = self.server.accept()
@@ -218,6 +220,7 @@ class Peer():
                 continue
 
             sock.settimeout(self.timeout)
+            self.logger.debug(f"Received offer from {peer_address}...")
 
             try:
                 # will block until a hello header is received
@@ -225,17 +228,18 @@ class Peer():
             except socket.timeout:
                 # no offer received within timeout seconds
                 sock.close()
+                self.logger.debug(f"No header received within {self.timeout} seconds, closing...")
                 continue
 
             if header.startswith(hello_header):
-                header = split_header(header, hello_header)
-                peer_name = header["peer_name"]
+                header = split_header(header)
+                peer_name = header.get("peer_name", "UNKNOWN_PEER")
 
                 self.connections[peer_name] = Connection(
                     self,
                     sock,
-                    buffer_size=header["buffer_size"],
-                    data_type=header["data_type"]
+                    buffer_size=default_buffer_size,
+                    data_type=header.get("data_type", "bytes")  # default most secure value to prevent attacks
                 )
                 self.logger.debug(f"Offer from [{peer_name}] accepted!")
 

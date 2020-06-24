@@ -16,6 +16,7 @@ def test_connect(peers: List[Dict[str, Any]]):
     peers[0].connect(peers[1].address)
 
     assert peers[1].address_name in peers[0].connections
+    assert peers[0].address_name in peers[1].connections
 
 
 @with_peers([{}, {}, {}])

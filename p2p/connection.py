@@ -4,13 +4,13 @@ import socket
 import threading
 from typing import Any
 
-from .utils import data_header, header_max_size, build_header, split_header
+from .utils import data_header, header_max_size, build_data_header, split_header, default_buffer_size
 
 
 class Connection():
 
-    def __init__(self, main_peer, sock: socket.socket, buffer_size: int = 2 ** 13, data_type: str = "raw", strict: bool = True):
-        if self.data_type not in ["raw", "json", "bytes"]:
+    def __init__(self, main_peer, sock: socket.socket, buffer_size: int = default_buffer_size, data_type: str = "raw", strict: bool = True):
+        if data_type not in ["raw", "json", "bytes"]:
             raise ValueError("data_type must be one of ['raw', 'json', 'bytes']")
 
         self.main_peer = main_peer
@@ -26,15 +26,7 @@ class Connection():
 
     @property
     def data_type(self):
-        self._data_type
-
-    @data_type.setter
-    def data_type(self, data_type):
-        self._data_type = data_type
-
-        if self.strict:
-            # TODO: send data_type update
-            pass
+        return self._data_type
 
     def send(self, data: Any):
         """Send data to the target peer, serializing it to this connection's default data format.
@@ -49,22 +41,24 @@ class Connection():
         if self.data_type == "raw":
             data = pickle.dumps(data)
         elif self.data_type == "json":
-            data = json.dumps(data)
+            data = json.dumps({
+                "data": data
+            })
         else:
             if not isinstance(data, bytes):
                 raise ValueError("data is not a bytes object")
 
         # then send information about data
-        header = build_header({
-            # so that the other peer knows how much data to handle
-            "size": len(data),
-            # so that the other peer know which type of data to handle
-            "data_type": self.data_type
-        }, header_type=data_header)
+        header = build_data_header(len(data), self.data_type)
 
         self.sock.sendall(header.encode("utf-8"))
 
-        self.sock.sendall(data)
+        # set the socket as blocking so that we wait for the data to be received
+        self.sock.setblocking(True)
+        self.sock.sendall(data)  # raises an error if data ain't fully sent
+
+        # reset the socket timeout
+        self.sock.settimeout(self.main_peer.timeout)
 
     def _receive(self, header: str):
         """Internal method to start the receiving process
@@ -76,14 +70,16 @@ class Connection():
             Any: the data received and deserialized (according to the data type referenced in the header)
         """
         header = split_header(header)
+        data_type = header.get("data_type", "bytes")  # default most secure value to prevent attacks
+        data_size = header.get("data_size", 0)
 
-        if self.strict and header["data_type"] != self.data_type:
+        if self.strict and data_type != self.data_type:
             return None
 
         # receiving data
         buffer = b""
-        nb_chunks = header["size"] // self.buffer_size
-        if header["size"] % self.buffer_size > 0:
+        nb_chunks = data_size // self.buffer_size
+        if data_size % self.buffer_size > 0:
             nb_chunks += 1
 
         for _ in range(nb_chunks):
@@ -91,10 +87,10 @@ class Connection():
 
         # deserializing data
         data = None
-        if header["data_type"] == "raw":
+        if data_type == "raw":
             data = pickle.loads(buffer)
-        elif header["data_type"] == "json":
-            data = json.loads(buffer)
+        elif data_type == "json":
+            data = json.loads(buffer)["data"]
 
         return data
 
@@ -120,7 +116,7 @@ class Connection():
 
                 data = self._receive(header)
 
-                self.main_peer.logger.debug(f"Data received: {data}")
+                self.main_peer.logger.debug(f"Data received!")
 
         self.sock.close()
         self.main_peer.logger.debug("Connection stopped!")
