@@ -6,7 +6,7 @@ import random
 import logging
 import threading
 
-from .utils import get_local_ip
+from .utils import hello_header, header_max_size, build_header, split_header, get_local_ip, check_address
 from .connection import Connection
 
 
@@ -57,30 +57,25 @@ class Peer():
         if not invisible and not self.pinger_thread.is_alive():
             self.pinger_thread.start()
 
-    def connect(self, address: str, port: int = None) -> Connection:
-        if isinstance(address, str):
-            if ":" in address:
-                ipv4, port = address.split(":")[:2]
-                address = (ipv4, int(port))
-            elif port is None:
-                raise ValueError("A port must be specified!")
-            else:
-                address = (address, int(port))
-        elif not hasattr(address, "__getitem__"):
-            raise ValueError("address should be a string ipv4:port or a tuple (ipv4, port)!")
-        else:
-            address = (str(address[0]), int(address[1]))
-
-        address_name = f"{address[0]}:{address[1]}"
+    def connect(self, address: str, port: int = None, buffer_size: int = 2 ** 13, data_type: str = "raw") -> Connection:
+        address, address_name = check_address(address, port)
 
         if address_name not in self.connections:
             self.logger.debug(f"Sending offer to [{address_name}]")
 
+            # TODO: use create_connection for ipv4 + ipv6 ??
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.timeout)
             sock.connect(address)
 
-            self.connections[address_name] = Connection(self, sock)
+            header = build_header({
+                "peer_name": self.address_name,
+                "buffer_size": buffer_size,
+                "data_type": data_type
+            }).encode("utf-8")
+            sock.send(header)
+
+            self.connections[address_name] = Connection(self, sock, buffer_size=buffer_size, data_type=data_type)
 
             self.logger.debug(f"Connection established with [{address_name}]")
 
@@ -114,9 +109,9 @@ class Peer():
 
         return addresses
 
-    def broadcast(self, data):
+    def broadcast(self, data, data_type: str = "raw"):
         for connection in self.connections.values():
-            connection.send(data)
+            connection.send(data, data_type)
 
     def stop(self, _async=False):
         self.stop_server_flag.set()
@@ -146,10 +141,27 @@ class Peer():
                 # no offer received within timeout seconds
                 continue
 
-            peer_name = f"{peer_address[0]}:{peer_address[1]}"
-            self.connections[peer_name] = Connection(self, sock)
+            sock.settimeout(self.timeout)
 
-            self.logger.debug(f"Offer from [{peer_name}] accepted!")
+            try:
+                # will block until a hello header is received
+                header = sock.recv(header_max_size).decode("utf-8")
+            except socket.timeout:
+                # no offer received within timeout seconds
+                sock.close()
+                continue
+
+            if header.startswith(hello_header):
+                header = split_header(header, hello_header)
+                peer_name = header["peer_name"]
+
+                self.connections[peer_name] = Connection(
+                    self,
+                    sock,
+                    buffer_size=header["buffer_size"],
+                    data_type=header["data_type"]
+                )
+                self.logger.debug(f"Offer from [{peer_name}] accepted!")
 
         self.server.close()
         self.logger.debug("Server stopped!")
