@@ -218,10 +218,63 @@ class Peer():
             if self.pinger_thread.is_alive():
                 self.pinger_thread.join()
 
+    def _handle(self, handler_type: str, *args) -> Any:
+        """Calls a handler if existing, passing arguments.
+
+        Args:
+            handler_type (str): the handler type to call.
+
+        Returns:
+            Any: whatever the handler, if existing, returns
+        """
+        handler = self.handlers.get(handler_type, None)
+        if handler is not None:
+            return handler(*args)
+
+    def _handle_offer(self, offer_header: str, sock: socket.socket) -> bool:
+        """Handles an offer received from a peer.
+
+        Args:
+            offer_header (str): the header received.
+            sock (socket.socket): the socket holding the connection.
+
+        Returns:
+            bool: whether this offer was accepted or rejected.
+        """
+        header = split_header(offer_header)
+        peer_name = header.get("peer_name", "UNKNOWN_PEER")
+        data_type = header.get("data_type", "bytes")
+        strict = header.get("strict", True)
+
+        connection = Connection(
+            self, peer_name, sock,
+            buffer_size=self.buffer_size,
+            data_type=data_type,
+            strict=strict
+        )
+
+        accept_connection = self._handle("connection", connection)
+
+        if accept_connection:
+            accept = build_header({}, accept_header)
+            sock.sendall(accept.encode("utf-8"))
+
+            self.connections[peer_name] = connection
+            connection.start_thread()
+            return True
+        else:
+            deny = build_header({}, deny_header)
+            sock.sendall(deny.encode("utf-8"))
+
+        sock.close()
+        return False
+
     def _listen_offers(self):
         """Starts this peer's server, used to listen for connection requests."""
 
         self.server.listen()
+
+        self._handle("listen", self)
 
         while not self.stop_server_flag.is_set():
             if len(self.connections) >= self.max_connections > 0:
@@ -248,33 +301,7 @@ class Peer():
                 continue
 
             if header.startswith(hello_header):
-                header = split_header(header)
-                peer_name = header.get("peer_name", "UNKNOWN_PEER")
-                data_type = header.get("data_type", "bytes")
-                strict = header.get("strict", True)
-
-                connection = Connection(
-                    self, peer_name, sock,
-                    buffer_size=self.buffer_size,
-                    data_type=data_type,
-                    strict=strict
-                )
-                connection_handler = self.handlers.get("connection", None)
-
-                if connection_handler is not None:
-                    if connection_handler(connection):
-                        accept = build_header({}, accept_header)
-                        sock.sendall(accept.encode("utf-8"))
-
-                        self.connections[peer_name] = connection
-                        connection.start_thread()
-                        # get to the next loop so that we don't close the connection
-                        continue
-                    else:
-                        deny = build_header({}, deny_header)
-                        sock.sendall(deny.encode("utf-8"))
-
-                sock.close()
+                self._handle_offer(header, sock)
 
         self.server.close()
         self.logger.debug("Server stopped!")
