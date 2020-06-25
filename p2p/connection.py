@@ -112,8 +112,6 @@ class Connection():
 
             # if we received a data header, otherwise do nothing with the received packet
             if header.startswith(data_header):
-                self.main_peer.logger.debug(f"Header received: {header}")
-
                 data = self._receive(header)
 
                 self.main_peer.logger.debug(f"Data received!")

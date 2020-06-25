@@ -113,8 +113,6 @@ class Peer():
         address, address_name = check_address(address, port)
 
         if address_name not in self.connections:
-            self.logger.debug(f"Sending offer to [{address_name}]")
-
             # TODO: use create_connection for ipv4 + ipv6 ??
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.timeout)
@@ -205,7 +203,6 @@ class Peer():
         """Starts this peer's server, used to listen for connection requests."""
 
         self.server.listen()
-        self.logger.info(f"Listening for connections...")
 
         while not self.stop_server_flag.is_set():
             if len(self.connections) >= self.max_connections > 0:
@@ -226,9 +223,8 @@ class Peer():
                 # will block until a hello header is received
                 header = sock.recv(header_max_size).decode("utf-8")
             except socket.timeout:
-                # no offer received within timeout seconds
+                # no offer received within timeout seconds, we cancel the connection
                 sock.close()
-                self.logger.debug(f"No header received within {self.timeout} seconds, closing...")
                 continue
 
             if header.startswith(hello_header):
@@ -256,8 +252,6 @@ class Peer():
 
             # will raise EADDRINUSE error if 2 peers are from the same device on Windows
             pinger.bind(("", 1024))
-
-            self.logger.debug("Pinger waiting for pings...")
 
             while not self.stop_server_flag.is_set() and not self.invisible:
                 try:
