@@ -3,10 +3,11 @@ import socket
 from typing import Dict, Any, Union, Tuple
 
 default_buffer_size = 8192
-default_handlers = {
+default_peer_handlers = {
     "listen": lambda peer: peer.logger.info(f"Server listening for connections!"),
     "connection": lambda connection: True
 }
+default_connection_handlers = {}
 
 
 def get_local_ip() -> str:

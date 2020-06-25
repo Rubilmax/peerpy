@@ -1,5 +1,8 @@
 from typing import Dict, Any, Union, Tuple
 
+from ..exceptions import HeaderSizeError
+
+# TODO: make protocol customizable
 header_separator = "|"
 header_values_separator = "&"
 header_key_separator = "="
@@ -9,7 +12,7 @@ hello_header = "HELLO"
 accept_header = "ACCEPT"
 deny_header = "DENY"
 
-header_max_size = int(2 ** 10)
+header_size = int(2 ** 6)
 
 header_data_types = {
     "data_size": int,
@@ -18,7 +21,7 @@ header_data_types = {
 }
 
 
-def build_header(header: Dict[str, Any], header_type: str) -> str:
+def build_header(header: Dict[str, Any], header_type: str) -> bytes:
     """Returns a normalized header of type header_type.
 
     Args:
@@ -26,17 +29,23 @@ def build_header(header: Dict[str, Any], header_type: str) -> str:
         header_type (str, optional): the type of the header to generate. Defaults to data_header.
 
     Returns:
-        str: the generated header
+        bytes: the generated encoded header
     """
     header_elements = [key + header_key_separator + str(value) for key, value in header.items()]
     header_body = header_values_separator.join(header_elements)
     if len(header_body) > 0:
         header_body = header_separator + header_body
 
-    return header_type + header_body
+    header_bytes = (header_type + header_body).encode("utf-8")
+    tail_size = header_size - len(header_bytes)
+    if tail_size < 0:
+        raise HeaderSizeError(
+            f"Header size ({len(header_bytes)}) is greater than the protocol's setting ({header_size})!")
+
+    return header_bytes + header_separator.encode("utf-8") * tail_size
 
 
-def build_hello_header(peer_name: str, data_type: str, strict: bool) -> str:
+def build_hello_header(peer_name: str, data_type: str, strict: bool) -> bytes:
     """Builds a header used to handshake with another peer and set up a data connection.
 
     Args:
@@ -44,7 +53,7 @@ def build_hello_header(peer_name: str, data_type: str, strict: bool) -> str:
         data_type (str): the data type to be sent.
 
     Returns:
-        str: the generated header
+        bytes: the generated encoded header
     """
     return build_header({
         # so that the other peer knows who we are
@@ -56,7 +65,7 @@ def build_hello_header(peer_name: str, data_type: str, strict: bool) -> str:
     }, header_type=hello_header)
 
 
-def build_data_header(data_size: int, data_type: str) -> str:
+def build_data_header(data_size: int, data_type: str) -> bytes:
     """Builds a header used to indentify data that will be send.
 
     Args:
@@ -64,7 +73,7 @@ def build_data_header(data_size: int, data_type: str) -> str:
         data_type (str): the data type to be sent.
 
     Returns:
-        str: the generated header
+        bytes: the generated encoded header
     """
     return build_header({
         # so that the other peer knows how much data to handle

@@ -2,28 +2,32 @@ import json
 import pickle
 import socket
 import threading
-from typing import Any, Callable, Dict
+from typing import Any
 
-from .headers import accept_header, deny_header, data_header, header_max_size, build_data_header, split_header
-from .utils import default_buffer_size
+from .event_handler import EventHandler
+from .utils import default_connection_handlers
+from .headers import data_header, header_size, build_data_header, split_header
 
 
-class Connection():
+class Connection(EventHandler):
 
-    def __init__(self, main_peer, target_name: str, sock: socket.socket, buffer_size: int, data_type: str = "json", strict: bool = True):
+    def __init__(self, main_peer, target_name: str, sock: socket.socket, buffer_size: int, **kwargs):
+        data_type = str(kwargs.get("data_type", "json"))
         if data_type not in ["raw", "json", "bytes"]:
             raise ValueError("data_type must be one of ['raw', 'json', 'bytes']")
 
+        handlers = dict(kwargs.get("handlers", default_connection_handlers))
+        super().__init__(handlers)
+
         self.main_peer = main_peer
-        self.target_name = target_name
+        self.target_name = str(target_name)
         self.sock = sock
         self.buffer_size = int(buffer_size)
         self._data_type = data_type
-        self.strict = strict  # TODO: implement strictness
+        self.strict = bool(kwargs.get("strict", True))
+        self.active = True
 
-        self.stop_listener_flag = threading.Event()
         self.thread = threading.Thread(target=self._listen)
-        self.thread.deamon = True
 
     @property
     def data_type(self):
@@ -55,8 +59,7 @@ class Connection():
 
         # then send information about data
         header = build_data_header(len(data), self.data_type)
-
-        self.sock.sendall(header.encode("utf-8"))
+        self.sock.sendall(header)
 
         # set the socket as blocking so that we wait for the data to be received
         self.sock.setblocking(True)
@@ -79,16 +82,19 @@ class Connection():
         data_size = header.get("data_size", 0)
 
         if self.strict and data_type != self.data_type:
+            self.main_peer.logger.warning(
+                f"Data type received is not complying with data type established at connection: {data_type} != {self.data_type}")
             return None
 
         # receiving data
         buffer = b""
         nb_chunks = data_size // self.buffer_size
-        if data_size % self.buffer_size > 0:
-            nb_chunks += 1
+        residue_size = data_size % self.buffer_size
 
         for _ in range(nb_chunks):
             buffer += self.sock.recv(self.buffer_size)
+        if residue_size > 0:
+            buffer += self.sock.recv(residue_size)
 
         # deserializing data
         data = None
@@ -99,18 +105,28 @@ class Connection():
 
         return data
 
-    def close(self):
-        self.stop_listener_flag.set()
+    def close(self, force: bool = False):
+        """Closes the connection nicely.
+
+        Args:
+            force (bool, optional): whether to force close the connection.
+            This setting should be considered dangerous, as data can be lost. Defaults to False.
+        """
+        self.active = False
+        self.sock.settimeout(0)  # try to speed up closing process
+
+        if force:
+            self.sock.shutdown(socket.SHUT_RDWR)
 
     def _listen(self):
-        while not self.stop_listener_flag.is_set():
+        while self.active:
             # in case timeout has changed
             if self.main_peer.timeout != self.sock.gettimeout():
                 self.sock.settimeout(self.main_peer.timeout)
 
             try:
                 # will block until any header is received or socket timeout
-                header = self.sock.recv(header_max_size).decode("utf-8")
+                header = self.sock.recv(header_size).decode("utf-8")
             except socket.timeout:
                 # no header received within timeout seconds
                 continue
@@ -119,7 +135,11 @@ class Connection():
             if header.startswith(data_header):
                 data = self._receive(header)
 
-                self.main_peer.logger.debug(f"Data received!")
+                # TODO: handle when sent data IS python's None
+                if data is not None:
+                    self.main_peer.logger.debug(f"Data received! Handlers: {self.handlers}")
+
+                    self.handle("data", data)
 
         self.sock.close()
         self.main_peer.logger.debug("Connection stopped!")

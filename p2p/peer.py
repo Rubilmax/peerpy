@@ -1,21 +1,23 @@
-import sys
 import time
 
 import socket
-import random
 import logging
 import threading
 
-from typing import Tuple, List, Any, Callable, Dict
+from typing import Tuple, List, Any, Dict
 
 from .connection import Connection
-from .headers import hello_header, accept_header, deny_header, header_max_size, build_hello_header, build_header, split_header
-from .utils import get_local_ip, check_address, default_buffer_size, default_handlers
+from .event_handler import EventHandler
+from .headers import hello_header, accept_header, deny_header, header_size, build_hello_header, build_header, split_header
+from .utils import get_local_ip, check_address, default_buffer_size, default_peer_handlers, default_connection_handlers
 
 
-class Peer():
+class Peer(EventHandler):
 
     def __init__(self, address: str = None, port: int = 0, **kwargs):
+        handlers = dict(kwargs.get("handlers", default_peer_handlers))
+        super().__init__(handlers)
+
         if address is None:
             address = get_local_ip()
         elif ":" in address:
@@ -27,18 +29,15 @@ class Peer():
         self.server.settimeout(timeout)
 
         self.connections = {}
-        self.handlers = dict(kwargs.get("handlers", default_handlers))
+        self.server_active = True
         self.max_connections = int(kwargs.get("max_connections", 0))
         self.logger = logging.getLogger(f"[{self.address_name}]")
         self.buffer_size = float(kwargs.get("buffer_size", default_buffer_size))
 
-        self.stop_server_flag = threading.Event()
         self.server_thread = threading.Thread(target=self._listen_offers)
-        self.server_thread.deamon = True
         self.server_thread.start()
 
         self.pinger_thread = threading.Thread(target=self._listen_pings)
-        self.pinger_thread.deamon = True
         # needs to be after pinger_thread because checks the pinger_thread state
         self.invisible = bool(kwargs.get("invisible", False))
 
@@ -128,18 +127,18 @@ class Peer():
                 return False
 
             header = build_hello_header(self.address_name, data_type, strict)
-            sock.sendall(header.encode("utf-8"))
+            sock.sendall(header)
 
             buffer_size = int(kwargs.get("buffer_size", self.buffer_size))
             connection = Connection(
-                self, address_name, sock,
-                buffer_size=buffer_size,
+                self, address_name, sock, buffer_size,
                 data_type=data_type,
-                strict=strict
+                strict=strict,
+                **kwargs
             )
 
             try:
-                header = sock.recv(header_max_size).decode("utf-8")
+                header = sock.recv(header_size).decode("utf-8")
             except socket.timeout:
                 sock.close()
                 return False
@@ -161,30 +160,30 @@ class Peer():
         Returns:
             List[str]: the list of visible peers' addresses
         """
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock.settimeout(.5)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.settimeout(.5)
 
-        sock.bind((get_local_ip(), 1024))
+            sock.bind((get_local_ip(), 1024))
 
-        self.logger.debug(f"Pinging local network...")
+            self.logger.debug(f"Pinging local network...")
 
-        address, port = sock.getsockname()
-        sock.sendto(f"PING {address}:{port}".encode("utf-8"), ("<broadcast>", 1024))
+            address, port = sock.getsockname()
+            sock.sendto(f"PING {address}:{port}".encode("utf-8"), ("<broadcast>", 1024))
 
-        addresses = []
-        while True:
-            try:
-                data = sock.recv(512).decode("utf-8")
-            except socket.timeout:
-                break
+            addresses = []
+            while True:
+                try:
+                    data = sock.recv(512).decode("utf-8")
+                except socket.timeout:
+                    break
 
-            if "PONG" in data:
-                address_name = data.split(" ")[1]
-                if address_name != self.address_name:
-                    self.logger.debug(f"Received pong from {address_name}!")
-                    addresses.append(address_name)
+                if "PONG" in data:
+                    address_name = data.split(" ")[1]
+                    if address_name != self.address_name:
+                        self.logger.debug(f"Received pong from {address_name}!")
+                        addresses.append(address_name)
 
         return addresses
 
@@ -204,7 +203,7 @@ class Peer():
         Args:
             _async (bool, optional): whether to stop this peer asynchronously. Defaults to False.
         """
-        self.stop_server_flag.set()
+        self.server_active = False
 
         for connection in self.connections.values():
             connection.close()
@@ -217,19 +216,6 @@ class Peer():
                 self.server_thread.join()
             if self.pinger_thread.is_alive():
                 self.pinger_thread.join()
-
-    def _handle(self, handler_type: str, *args) -> Any:
-        """Calls a handler if existing, passing arguments.
-
-        Args:
-            handler_type (str): the handler type to call.
-
-        Returns:
-            Any: whatever the handler, if existing, returns
-        """
-        handler = self.handlers.get(handler_type, None)
-        if handler is not None:
-            return handler(*args)
 
     def _handle_offer(self, offer_header: str, sock: socket.socket) -> bool:
         """Handles an offer received from a peer.
@@ -247,36 +233,57 @@ class Peer():
         strict = header.get("strict", True)
 
         connection = Connection(
-            self, peer_name, sock,
-            buffer_size=self.buffer_size,
+            self, peer_name, sock, self.buffer_size,
             data_type=data_type,
             strict=strict
         )
 
-        accept_connection = self._handle("connection", connection)
-
-        if accept_connection:
+        if self.handle("connection", connection):
             accept = build_header({}, accept_header)
-            sock.sendall(accept.encode("utf-8"))
+            sock.sendall(accept)
 
             self.connections[peer_name] = connection
             connection.start_thread()
             return True
         else:
             deny = build_header({}, deny_header)
-            sock.sendall(deny.encode("utf-8"))
+            sock.sendall(deny)
 
         sock.close()
         return False
 
+    def _listen_pings(self):
+        """Starts this peer's pinger, used to answer pings from other seeking peers."""
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as pinger:
+            pinger.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            pinger.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            pinger.settimeout(.5)
+
+            # will raise EADDRINUSE error if 2 peers are from the same device on Windows
+            pinger.bind(("", 1024))
+
+            while self.server_active and not self.invisible:
+                try:
+                    data = pinger.recv(512).decode("utf-8")
+                except socket.timeout:
+                    continue
+
+                if "PING" in data and not self.invisible:  # in case this peer's visibility changed within the timeout window
+                    address_name = data.split(" ")[1]
+
+                    self.logger.debug(f"Received ping from {address_name}!")
+
+                    address, port = address_name.split(":")
+                    pinger.sendto(f"PONG {self.address_name}".encode("utf-8"), (address, int(port)))
+
+        self.logger.debug("Pinger stopped!")
+
     def _listen_offers(self):
         """Starts this peer's server, used to listen for connection requests."""
-
         self.server.listen()
+        self.handle("listen", self)
 
-        self._handle("listen", self)
-
-        while not self.stop_server_flag.is_set():
+        while self.server_active:
             if len(self.connections) >= self.max_connections > 0:
                 time.sleep(1)
                 continue
@@ -294,7 +301,7 @@ class Peer():
             try:
                 # will block until a hello header is received
                 # TODO: test if we send broken data at this point in time
-                header = sock.recv(header_max_size).decode("utf-8")
+                header = sock.recv(header_size).decode("utf-8")
             except socket.timeout:
                 # no offer received within timeout seconds, we cancel the connection
                 sock.close()
@@ -305,30 +312,3 @@ class Peer():
 
         self.server.close()
         self.logger.debug("Server stopped!")
-
-    def _listen_pings(self):
-        """Starts this peer's pinger, used to answer pings from other seeking peers."""
-
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as pinger:
-            pinger.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            pinger.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            pinger.settimeout(.5)
-
-            # will raise EADDRINUSE error if 2 peers are from the same device on Windows
-            pinger.bind(("", 1024))
-
-            while not self.stop_server_flag.is_set() and not self.invisible:
-                try:
-                    data = pinger.recv(512).decode("utf-8")
-                except socket.timeout:
-                    continue
-
-                if "PING" in data and not self.invisible:  # in case this peer's visibility changed within the timeout window
-                    address_name = data.split(" ")[1]
-
-                    self.logger.debug(f"Received ping from {address_name}!")
-
-                    address, port = address_name.split(":")
-                    pinger.sendto(f"PONG {self.address_name}".encode("utf-8"), (address, int(port)))
-
-        self.logger.debug("Pinger stopped!")
