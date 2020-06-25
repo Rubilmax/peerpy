@@ -6,7 +6,7 @@ from .utils import with_peers
 @with_peers([{}, {}])
 def test_send(peers: List[Dict[str, Any]]):
     """Tests data sending from one peer to another"""
-    connection = peers[0].connect(peers[1].address_name, data_type="raw")
+    connection = peers[0].connect(peers[1].address_name, data_type="json")
 
     connection.send("2easy4u")
 
@@ -17,3 +17,9 @@ def test_send_large(peers: List[Dict[str, Any]]):
     connection = peers[0].connect(peers[1].address_name, data_type="raw")
 
     connection.send(list(range(int(2e6))))
+
+
+@with_peers([{}, {"handlers": {"offer": (lambda offer: print(offer))}}])
+def test_handlers(peers: List[Dict[str, Any]]):
+    """Tests a peer's handlers"""
+    connection = peers[0].connect(peers[1].address_name)

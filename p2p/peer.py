@@ -6,27 +6,31 @@ import random
 import logging
 import threading
 
-from typing import Tuple, List, Any
+from typing import Tuple, List, Any, Callable, Dict
 
 from .connection import Connection
-from .utils import hello_header, header_max_size, build_hello_header, split_header, get_local_ip, check_address, default_buffer_size
+from .headers import hello_header, accept_header, deny_header, header_max_size, build_hello_header, build_header, split_header
+from .utils import get_local_ip, check_address, default_buffer_size, default_handlers
 
 
 class Peer():
 
-    def __init__(self, address: str = None, port: int = 0, timeout: int = 5, invisible: bool = False, max_connections: int = 0):
+    def __init__(self, address: str = None, port: int = 0, **kwargs):
         if address is None:
             address = get_local_ip()
         elif ":" in address:
             address, port = address.split(":")[:2]
 
+        timeout = float(kwargs.get("timeout", 5))
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind((address, int(port)))
         self.server.settimeout(timeout)
 
         self.connections = {}
-        self.max_connections = max_connections
+        self.handlers = dict(kwargs.get("handlers", default_handlers))
+        self.max_connections = int(kwargs.get("max_connections", 0))
         self.logger = logging.getLogger(f"[{self.address_name}]")
+        self.buffer_size = float(kwargs.get("buffer_size", default_buffer_size))
 
         self.stop_server_flag = threading.Event()
         self.server_thread = threading.Thread(target=self._listen_offers)
@@ -35,7 +39,8 @@ class Peer():
 
         self.pinger_thread = threading.Thread(target=self._listen_pings)
         self.pinger_thread.deamon = True
-        self.invisible = invisible  # needs to be the last because checks the pinger_thread state
+        # needs to be after pinger_thread because checks the pinger_thread state
+        self.invisible = bool(kwargs.get("invisible", False))
 
     @property
     def address(self) -> Tuple[str, int]:
@@ -95,7 +100,7 @@ class Peer():
         if not invisible and not self.pinger_thread.is_alive():
             self.pinger_thread.start()
 
-    def connect(self, address: str, port: int = None, buffer_size: int = default_buffer_size, data_type: str = "raw", strict: bool = True) -> Connection:
+    def connect(self, address: str, port: int = None, data_type: str = "json", strict: bool = True, **kwargs) -> Connection:
         """Attempts to start a connection with a remote peer located at (address, port).
         Additional arguments are passed to the Connection constructor and sent to the remote peer right after successful
         connection, so that it knows with what data type to communicate with.
@@ -103,9 +108,9 @@ class Peer():
         Args:
             address (str): the ipv4 address of the remote peer, provided with the port if wanted (ipv4:port)
             port (int, optional): the port to use for the connection, if not provided in address. Defaults to None.
-            buffer_size (int, optional): the buffer size to use to receive data. Defaults to p2p.utils.default_buffer_size.
             data_type (str, optional): the data type to use for the connection. Defaults to "raw".
             strict (bool, optional): whether this connection is strict on data types. Defaults to True.
+            buffer_size (int, optional): the buffer size to use to receive data. Defaults to this peer's buffer size.
 
         Returns:
             Connection: the connection, if established
@@ -122,17 +127,31 @@ class Peer():
             except socket.timeout:
                 return False
 
-            header = build_hello_header(self.address_name, data_type)
+            header = build_hello_header(self.address_name, data_type, strict)
             sock.sendall(header.encode("utf-8"))
 
-            self.connections[address_name] = Connection(
-                self,
-                sock,
+            buffer_size = int(kwargs.get("buffer_size", self.buffer_size))
+            connection = Connection(
+                self, address_name, sock,
                 buffer_size=buffer_size,
                 data_type=data_type,
                 strict=strict
             )
-            self.logger.debug(f"Connection established with [{address_name}]")
+
+            try:
+                header = sock.recv(header_max_size).decode("utf-8")
+            except socket.timeout:
+                sock.close()
+                return False
+
+            # only check if header is ACCEPT, otherwise cancel connection
+            if header.startswith(accept_header):
+                self.connections[address_name] = connection
+                connection.start_thread()
+
+                self.logger.debug(f"Connection established with [{address_name}]!")
+            else:
+                sock.close()
 
         return self.connections.get(address_name, False)
 
@@ -221,6 +240,7 @@ class Peer():
 
             try:
                 # will block until a hello header is received
+                # TODO: test if we send broken data at this point in time
                 header = sock.recv(header_max_size).decode("utf-8")
             except socket.timeout:
                 # no offer received within timeout seconds, we cancel the connection
@@ -230,14 +250,31 @@ class Peer():
             if header.startswith(hello_header):
                 header = split_header(header)
                 peer_name = header.get("peer_name", "UNKNOWN_PEER")
+                data_type = header.get("data_type", "bytes")
+                strict = header.get("strict", True)
 
-                self.connections[peer_name] = Connection(
-                    self,
-                    sock,
-                    buffer_size=default_buffer_size,
-                    data_type=header.get("data_type", "bytes")  # default most secure value to prevent attacks
+                connection = Connection(
+                    self, peer_name, sock,
+                    buffer_size=self.buffer_size,
+                    data_type=data_type,
+                    strict=strict
                 )
-                self.logger.debug(f"Offer from [{peer_name}] accepted!")
+                connection_handler = self.handlers.get("connection", None)
+
+                if connection_handler is not None:
+                    if connection_handler(connection):
+                        accept = build_header({}, accept_header)
+                        sock.sendall(accept.encode("utf-8"))
+
+                        self.connections[peer_name] = connection
+                        connection.start_thread()
+                        # get to the next loop so that we don't close the connection
+                        continue
+                    else:
+                        deny = build_header({}, deny_header)
+                        sock.sendall(deny.encode("utf-8"))
+
+                sock.close()
 
         self.server.close()
         self.logger.debug("Server stopped!")

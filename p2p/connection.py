@@ -2,31 +2,36 @@ import json
 import pickle
 import socket
 import threading
-from typing import Any
+from typing import Any, Callable, Dict
 
-from .utils import data_header, header_max_size, build_data_header, split_header, default_buffer_size
+from .headers import accept_header, deny_header, data_header, header_max_size, build_data_header, split_header
+from .utils import default_buffer_size
 
 
 class Connection():
 
-    def __init__(self, main_peer, sock: socket.socket, buffer_size: int = default_buffer_size, data_type: str = "raw", strict: bool = True):
+    def __init__(self, main_peer, target_name: str, sock: socket.socket, buffer_size: int, data_type: str = "json", strict: bool = True):
         if data_type not in ["raw", "json", "bytes"]:
             raise ValueError("data_type must be one of ['raw', 'json', 'bytes']")
 
         self.main_peer = main_peer
+        self.target_name = target_name
         self.sock = sock
         self.buffer_size = int(buffer_size)
         self._data_type = data_type
-        self.strict = strict
+        self.strict = strict  # TODO: implement strictness
 
         self.stop_listener_flag = threading.Event()
         self.thread = threading.Thread(target=self._listen)
         self.thread.deamon = True
-        self.thread.start()
 
     @property
     def data_type(self):
         return self._data_type
+
+    def start_thread(self):
+        if not self.thread.is_alive():
+            self.thread.start()
 
     def send(self, data: Any):
         """Send data to the target peer, serializing it to this connection's default data format.
@@ -43,7 +48,7 @@ class Connection():
         elif self.data_type == "json":
             data = json.dumps({
                 "data": data
-            })
+            }).encode("utf-8")
         else:
             if not isinstance(data, bytes):
                 raise ValueError("data is not a bytes object")
