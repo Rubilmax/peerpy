@@ -1,7 +1,7 @@
 import pytest
 
 from ..utils import with_peers
-from .conftest import data_test, data_large
+from .conftest import data_test
 
 
 @pytest.fixture
@@ -21,4 +21,4 @@ def test_send_large(peers):
     """Tests relatively large data sending from one peer to another"""
     connection = peers[0].connect(peers[1].address_name, data_type="raw")
 
-    connection.send(data_large)
+    connection.send(list(range(int(2e6))))

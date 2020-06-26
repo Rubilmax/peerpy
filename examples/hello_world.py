@@ -1,6 +1,7 @@
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join('.')))  # ignore this
+# allow the example to be run without installing the package, from this repository's root directory
+sys.path.append(os.path.abspath(os.path.join('.')))
 
 from peerpy import Peer
 
