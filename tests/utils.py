@@ -1,7 +1,7 @@
 import time
 from typing import List, Dict, Any, Callable
 
-from p2p import Peer
+from peerpy import Peer
 
 
 def with_peers(peers_args: Callable[[], List[Dict[str, Any]]]):

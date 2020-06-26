@@ -1,3 +1,3 @@
-import p2p
+import peerpy
 
-p2p.protocol.default_timeout = 1.
+peerpy.protocol.default_timeout = 1.

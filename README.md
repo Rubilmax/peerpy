@@ -1,7 +1,7 @@
-# python-p2p package
+# peerpy package
 
 ## Installation
 
-`pip install python-p2p`
+`pip install peerpy`
 
 ## Usage

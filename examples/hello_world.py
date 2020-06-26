@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join('.')))  # ignore this
 
-from p2p import Peer
+from peerpy import Peer
 
 
 # handler to be executed at connection time (return value indicates whether to accept or deny the connection)
