@@ -29,14 +29,12 @@ class Peer(EventHandler):
         self.server.settimeout(timeout)
 
         self.connections = {}
-        self.server_active = True
+        self._server_active = False
         self.max_connections = int(kwargs.get("max_connections", 0))
         self.logger = logging.getLogger(f"[{self.address_name}]")
         self.buffer_size = float(kwargs.get("buffer_size", default_buffer_size))
 
         self.server_thread = threading.Thread(target=self._listen_offers)
-        self.server_thread.start()
-
         self.pinger_thread = threading.Thread(target=self._listen_pings)
         # needs to be after pinger_thread because checks the pinger_thread state
         self.invisible = bool(kwargs.get("invisible", False))
@@ -96,7 +94,7 @@ class Peer(EventHandler):
         self._invisible = invisible
 
         # if this peer's now visible and the pinger thread is stopped, restart it
-        if not invisible and not self.pinger_thread.is_alive():
+        if self._server_active and not invisible and not self.pinger_thread.is_alive():
             self.pinger_thread.start()
 
     def connect(self, address: str, port: int = None, data_type: str = "json", strict: bool = True, **kwargs) -> Connection:
@@ -197,6 +195,15 @@ class Peer(EventHandler):
             # TODO: handle type(data) != connection.data_type
             connection.send(data)
 
+    def start(self):
+        """Attempts to start this peer's server and pinger (if needed)."""
+        if not self._server_active:
+            self._server_active = True
+            self.server_thread.start()
+
+            if not self.invisible:
+                self.pinger_thread.start()
+
     def stop(self, _async=False):
         """Attempts to stop this peer and all its connections.
 
@@ -204,7 +211,7 @@ class Peer(EventHandler):
             _async (bool, optional): whether to stop this peer asynchronously. Defaults to False.
         """
         # TODO: make it compatible with with statements
-        self.server_active = False
+        self._server_active = False
 
         for connection in self.connections.values():
             connection.close()
@@ -263,7 +270,7 @@ class Peer(EventHandler):
             # will raise EADDRINUSE error if 2 peers are from the same device on Windows
             pinger.bind(("", 1024))
 
-            while self.server_active and not self.invisible:
+            while self._server_active and not self.invisible:
                 try:
                     data = pinger.recv(512).decode("utf-8")
                 except socket.timeout:
@@ -282,7 +289,7 @@ class Peer(EventHandler):
         self.server.listen()
         self.handle("listen", self)
 
-        while self.server_active:
+        while self._server_active:
             if len(self.connections) >= self.max_connections > 0:
                 time.sleep(1)
                 continue
@@ -310,3 +317,11 @@ class Peer(EventHandler):
                 self._handle_offer(header, sock)
 
         self.server.close()
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.stop()
+        return False  # always reraise exception
