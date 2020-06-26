@@ -1,24 +1,26 @@
-from typing import Dict, Any, Union, Tuple
+from typing import Dict, Callable, Any, Union
+from dataclasses import dataclass
 
-from ..exceptions import HeaderSizeError
+from .exceptions import HeaderSizeError
 
-# TODO: make protocol customizable
-header_separator = "|"
-header_values_separator = "&"
-header_key_separator = "="
 
-data_header = "DATA"
-hello_header = "HELLO"
-accept_header = "ACCEPT"
-deny_header = "DENY"
+header_size: int = int(2 ** 6)
+header_separator: str = "|"
+header_values_separator: str = "&"
+header_key_separator: str = "="
 
-header_size = int(2 ** 6)
+data_header: str = "DATA"
+hello_header: str = "HELLO"
+accept_header: str = "ACCEPT"
+deny_header: str = "DENY"
 
-header_data_types = {
+header_data_types: Dict[str, Callable] = {
     "data_size": int,
     "buffer_size": int,
     "strict": bool
 }
+
+pinger_port: int = 1024
 
 
 def build_header(header: Dict[str, Any], header_type: str) -> bytes:

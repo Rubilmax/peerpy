@@ -6,7 +6,7 @@ from typing import Any
 
 from .event_handler import EventHandler
 from .utils import default_connection_handlers
-from .headers import data_header, header_size, build_data_header, split_header
+from .protocol import data_header, header_size, build_data_header, split_header
 
 
 class Connection(EventHandler):
@@ -137,9 +137,8 @@ class Connection(EventHandler):
 
                 # TODO: handle when sent data IS python's None
                 if data is not None:
-                    self.main_peer.logger.debug(f"Data received! Handlers: {self.handlers}")
+                    self.main_peer.logger.debug(f"Data received!")
 
                     self.handle("data", data)
 
         self.sock.close()
-        self.main_peer.logger.debug("Connection stopped!")

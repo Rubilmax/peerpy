@@ -3,6 +3,7 @@ import socket
 from typing import Dict, Any, Union, Tuple
 
 default_buffer_size = 8192
+default_timeout = 5
 default_peer_handlers = {
     "listen": lambda peer: peer.logger.info(f"Server listening for connections!"),
     "connection": lambda connection: True

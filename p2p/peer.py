@@ -8,8 +8,8 @@ from typing import Tuple, List, Any, Dict
 
 from .connection import Connection
 from .event_handler import EventHandler
-from .headers import hello_header, accept_header, deny_header, header_size, build_hello_header, build_header, split_header
-from .utils import get_local_ip, check_address, default_buffer_size, default_peer_handlers, default_connection_handlers
+from .protocol import hello_header, accept_header, deny_header, header_size, build_hello_header, build_header, split_header
+from .utils import get_local_ip, check_address, default_buffer_size, default_peer_handlers, default_connection_handlers, default_timeout
 
 
 class Peer(EventHandler):
@@ -23,7 +23,7 @@ class Peer(EventHandler):
         elif ":" in address:
             address, port = address.split(":")[:2]
 
-        timeout = float(kwargs.get("timeout", 5))
+        timeout = float(kwargs.get("timeout", default_timeout))
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind((address, int(port)))
         self.server.settimeout(timeout)
@@ -203,6 +203,7 @@ class Peer(EventHandler):
         Args:
             _async (bool, optional): whether to stop this peer asynchronously. Defaults to False.
         """
+        # TODO: make it compatible with with statements
         self.server_active = False
 
         for connection in self.connections.values():
@@ -276,8 +277,6 @@ class Peer(EventHandler):
                     address, port = address_name.split(":")
                     pinger.sendto(f"PONG {self.address_name}".encode("utf-8"), (address, int(port)))
 
-        self.logger.debug("Pinger stopped!")
-
     def _listen_offers(self):
         """Starts this peer's server, used to listen for connection requests."""
         self.server.listen()
@@ -311,4 +310,3 @@ class Peer(EventHandler):
                 self._handle_offer(header, sock)
 
         self.server.close()
-        self.logger.debug("Server stopped!")
