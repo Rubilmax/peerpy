@@ -4,3 +4,7 @@ class HandlerMissingException(Exception):
 
 class HeaderSizeError(Exception):
     pass
+
+
+class DataSizeError(Exception):
+    pass

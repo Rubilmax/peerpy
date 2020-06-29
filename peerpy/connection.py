@@ -7,6 +7,7 @@ from typing import Any
 from .event_handler import EventHandler
 from .utils import valid_data_types, build_data_header, split_header
 from .protocol import headers, defaults
+from .exceptions import DataSizeError
 
 
 class Connection(EventHandler):
@@ -66,13 +67,16 @@ class Connection(EventHandler):
             if not isinstance(data, bytes):
                 raise ValueError("data is not a bytes object")
 
+        data_size = len(data)
         if not self.stream or self.data_size == "auto":
             # then send information about data
-            header = build_data_header(len(data), self.data_type)
+            header = build_data_header(data_size, self.data_type)
             self.sock.sendall(header)
 
             if self.data_size == "auto":
-                self.data_size = len(data)
+                self.data_size = data_size
+        elif self.data_size != data_size:
+            raise DataSizeError(f"Data size ({data_size}) is different from the stream size ({self.data_size})")
 
         # set the socket as blocking so that we wait for the data to be received
         self.sock.setblocking(True)
@@ -122,6 +126,8 @@ class Connection(EventHandler):
             data = pickle.loads(buffer)
         elif data_type == "json":
             data = json.loads(buffer)["data"]
+        else:
+            data = buffer
 
         return data
 

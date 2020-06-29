@@ -3,7 +3,8 @@ import pytest
 
 from peerpy import Peer
 from ..utils import with_peers
-from .conftest import data_test
+
+data_test = "2easy4u"
 
 
 @pytest.fixture
