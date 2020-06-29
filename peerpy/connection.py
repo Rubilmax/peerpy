@@ -5,18 +5,23 @@ import threading
 from typing import Any
 
 from .event_handler import EventHandler
-from .utils import default_connection_handlers
-from .protocol import data_header, header_size, build_data_header, split_header
+from .utils import valid_data_types, build_data_header, split_header
+from .protocol import headers, defaults
 
 
 class Connection(EventHandler):
 
     def __init__(self, main_peer, target_name: str, sock: socket.socket, buffer_size: int, **kwargs):
         data_type = str(kwargs.get("data_type", "json"))
-        if data_type not in ["raw", "json", "bytes"]:
-            raise ValueError("data_type must be one of ['raw', 'json', 'bytes']")
+        if data_type not in valid_data_types:
+            raise ValueError(f"data_type must be one of {valid_data_types}")
 
-        handlers = dict(kwargs.get("handlers", default_connection_handlers))
+        stream = bool(kwargs.get("stream", False))
+        data_size = int(kwargs["data_size"]) if "data_size" in kwargs else "auto"
+        if stream and data_size != "auto" and data_size <= 0:
+            raise ValueError(f"Data size should be > 0 or 'auto' (Received {data_size})!")
+
+        handlers = dict(kwargs.get("handlers", defaults.connection_handlers))
         super().__init__(handlers)
 
         self.main_peer = main_peer
@@ -25,6 +30,8 @@ class Connection(EventHandler):
         self.buffer_size = int(buffer_size)
         self._data_type = data_type
         self.strict = bool(kwargs.get("strict", True))
+        self.stream = stream
+        self.data_size = data_size
         self.active = True
 
         self.thread = threading.Thread(target=self._listen)
@@ -46,6 +53,8 @@ class Connection(EventHandler):
         Raises:
             ValueError: if this connection's default format is bytes and the data is not bytes
         """
+        # send a header if the connection is not streaming
+        # otherwise, data_type is fixed and known and data is of fixed size so header is useless
         # first encode data according to this connection's default data type
         if self.data_type == "raw":
             data = pickle.dumps(data)
@@ -57,9 +66,13 @@ class Connection(EventHandler):
             if not isinstance(data, bytes):
                 raise ValueError("data is not a bytes object")
 
-        # then send information about data
-        header = build_data_header(len(data), self.data_type)
-        self.sock.sendall(header)
+        if not self.stream or self.data_size == "auto":
+            # then send information about data
+            header = build_data_header(len(data), self.data_type)
+            self.sock.sendall(header)
+
+            if self.data_size == "auto":
+                self.data_size = len(data)
 
         # set the socket as blocking so that we wait for the data to be received
         self.sock.setblocking(True)
@@ -68,7 +81,7 @@ class Connection(EventHandler):
         # reset the socket timeout
         self.sock.settimeout(self.main_peer.timeout)
 
-    def _receive(self, header: str):
+    def _receive_data(self, header: str):
         """Internal method to start the receiving process
 
         Args:
@@ -78,14 +91,21 @@ class Connection(EventHandler):
             Any: the data received and deserialized (according to the data type referenced in the header)
         """
         header = split_header(header)
+        # TODO: handle missing values
         data_type = header.get("data_type", "bytes")  # default most secure value to prevent attacks
         data_size = header.get("data_size", 0)
+
+        if self.data_size == "auto":
+            self.data_size = data_size
 
         if self.strict and data_type != self.data_type:
             self.main_peer.logger.warning(
                 f"Data type received is not complying with data type established at connection: {data_type} != {self.data_type}")
             return None
 
+        return self._receive(data_size, data_type)
+
+    def _receive(self, data_size: int, data_type: str):
         # receiving data
         buffer = b""
         nb_chunks = data_size // self.buffer_size
@@ -124,21 +144,23 @@ class Connection(EventHandler):
             if self.main_peer.timeout != self.sock.gettimeout():
                 self.sock.settimeout(self.main_peer.timeout)
 
+            header, data = None, None
             try:
-                # will block until any header is received or socket timeout
-                header = self.sock.recv(header_size).decode("utf-8")
+                # will block until any streaming data/header is received or socket timeout
+                if self.stream and self.data_size != "auto":
+                    data = self._receive(self.data_size, self.data_type)
+                else:
+                    header = self.sock.recv(headers.size).decode("utf-8")
             except socket.timeout:
-                # no header received within timeout seconds
+                # no header/streaming data received within timeout seconds
                 continue
 
             # if we received a data header, otherwise do nothing with the received packet
-            if header.startswith(data_header):
-                data = self._receive(header)
+            if header is not None and header.startswith(headers.data_header):
+                data = self._receive_data(header)
 
+            if data is not None:
                 # TODO: handle when sent data IS python's None
-                if data is not None:
-                    self.main_peer.logger.debug(f"Data received!")
-
-                    self.handle("data", data)
+                self.handle("data", data)
 
         self.sock.close()

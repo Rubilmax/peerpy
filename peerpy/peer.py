@@ -8,14 +8,14 @@ from typing import Tuple, List, Any, Dict
 
 from .connection import Connection
 from .event_handler import EventHandler
-from .protocol import hello_header, accept_header, deny_header, header_size, build_hello_header, build_header, split_header
-from .utils import get_local_ip, check_address, default_buffer_size, default_peer_handlers, default_connection_handlers, default_timeout
+from .protocol import headers, defaults
+from .utils import get_local_ip, check_address, build_hello_header, build_header, split_header
 
 
 class Peer(EventHandler):
 
     def __init__(self, address: str = None, port: int = 0, **kwargs):
-        handlers = dict(kwargs.get("handlers", default_peer_handlers))
+        handlers = dict(kwargs.get("handlers", defaults.peer_handlers))
         super().__init__(handlers)
 
         if address is None:
@@ -23,7 +23,7 @@ class Peer(EventHandler):
         elif ":" in address:
             address, port = address.split(":")[:2]
 
-        timeout = float(kwargs.get("timeout", default_timeout))
+        timeout = float(kwargs.get("timeout", defaults.timeout))
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind((address, int(port)))
         self.server.settimeout(timeout)
@@ -32,7 +32,7 @@ class Peer(EventHandler):
         self._server_active = False
         self.max_connections = int(kwargs.get("max_connections", 0))
         self.logger = logging.getLogger(f"[{self.address_name}]")
-        self.buffer_size = float(kwargs.get("buffer_size", default_buffer_size))
+        self.buffer_size = float(kwargs.get("buffer_size", defaults.buffer_size))
 
         self.server_thread = threading.Thread(target=self._listen_offers)
         self.pinger_thread = threading.Thread(target=self._listen_pings)
@@ -118,16 +118,14 @@ class Peer(EventHandler):
             # TODO: use create_connection for ipv4 + ipv6 ??
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.timeout)
-
             try:
                 sock.connect(address)
             except socket.timeout:
                 return False
 
-            header = build_hello_header(self.address_name, data_type, strict)
-            sock.sendall(header)
-
             buffer_size = int(kwargs.get("buffer_size", self.buffer_size))
+            # will raise ValueError if stream and data_size are incompatible
+            # will parse kwargs to their right properties
             connection = Connection(
                 self, address_name, sock, buffer_size,
                 data_type=data_type,
@@ -135,14 +133,22 @@ class Peer(EventHandler):
                 **kwargs
             )
 
+            header = build_hello_header(
+                self.address_name,
+                data_type,
+                strict,
+                stream=connection.stream
+            )
+            sock.sendall(header)
+
             try:
-                header = sock.recv(header_size).decode("utf-8")
+                header = sock.recv(headers.size).decode("utf-8")
             except socket.timeout:
                 sock.close()
                 return False
 
             # only check if header is ACCEPT, otherwise cancel connection
-            if header.startswith(accept_header):
+            if header.startswith(headers.accept_header):
                 self.connections[address_name] = connection
                 connection.start_thread()
 
@@ -210,7 +216,6 @@ class Peer(EventHandler):
         Args:
             _async (bool, optional): whether to stop this peer asynchronously. Defaults to False.
         """
-        # TODO: make it compatible with with statements
         self._server_active = False
 
         for connection in self.connections.values():
@@ -236,25 +241,28 @@ class Peer(EventHandler):
             bool: whether this offer was accepted or rejected.
         """
         header = split_header(offer_header)
+        # TODO: handle when fields are missing
         peer_name = header.get("peer_name", "UNKNOWN_PEER")
         data_type = header.get("data_type", "bytes")
         strict = header.get("strict", True)
+        stream = header.get("stream", False)
 
         connection = Connection(
             self, peer_name, sock, self.buffer_size,
             data_type=data_type,
-            strict=strict
+            strict=strict,
+            stream=stream
         )
 
         if self.handle("connection", connection):
-            accept = build_header({}, accept_header)
+            accept = build_header(headers.accept_header, {})
             sock.sendall(accept)
 
             self.connections[peer_name] = connection
             connection.start_thread()
             return True
         else:
-            deny = build_header({}, deny_header)
+            deny = build_header(headers.deny_header, {})
             sock.sendall(deny)
 
         sock.close()
@@ -307,13 +315,13 @@ class Peer(EventHandler):
             try:
                 # will block until a hello header is received
                 # TODO: test if we send broken data at this point in time
-                header = sock.recv(header_size).decode("utf-8")
+                header = sock.recv(headers.size).decode("utf-8")
             except socket.timeout:
                 # no offer received within timeout seconds, we cancel the connection
                 sock.close()
                 continue
 
-            if header.startswith(hello_header):
+            if header.startswith(headers.hello_header):
                 self._handle_offer(header, sock)
 
         self.server.close()

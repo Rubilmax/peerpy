@@ -45,7 +45,7 @@ with Peer(port=12345, timeout=1) as peer1:
         "connection": set_connection_handler
     }) as peer2:
         # data_type="raw" to tell the other peer that we are sending a python object (which will need to be unpickled)
-        connection = peer1.connect(peer2.address, data_type="raw")
+        connection = peer1.connect(peer2.address, data_type="raw", stream=True)
 
         if connection:  # if connection was successful
             while True:
