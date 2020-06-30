@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="peerpy",
-    version="0.9.0",
+    version="0.9.1",
     author="Rubilmax",
     author_email="rmilon@gmail.com",
     description="p2p connection over TCP made dead simple!",

@@ -34,6 +34,7 @@ headers = Headers(data_types_parsers={
     "strict": bool
 })
 defaults = Defaults(peer_handlers={
-    "listen": lambda peer: print(f"Server listening for connections!"),
-    "connection": lambda connection: True
+    "listen": lambda peer: print(f"Peer listening for connections on {peer.address_name}!"),
+    "offer": lambda connection: True,
+    "stop": lambda peer: print(f"Peer ({peer.address_name}) stopped!")
 })

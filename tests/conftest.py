@@ -1,3 +1,3 @@
 import peerpy
 
-peerpy.protocol.default_timeout = 1.
+peerpy.protocol.default_timeout = .5
