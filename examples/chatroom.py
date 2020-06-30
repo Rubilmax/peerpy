@@ -3,7 +3,12 @@ import os
 # allow the example to be run without installing the package, from this repository's root directory
 sys.path.append(os.path.abspath(os.path.join('.')))
 
-"""Chatroom Example"""
+"""
+Chatroom Example
+
+This example is made to be run from 2 separate python shells:
+python examples/hello_world.py
+"""
 from peerpy import Peer, protocol
 
 # by default, whenever a message is received from a connection, print it

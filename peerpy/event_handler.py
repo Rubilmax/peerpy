@@ -26,3 +26,6 @@ class EventHandler():
             return handler(*args)
         elif handler_type in self.handler_list:
             raise HandlerMissingException(f"{self.__name__} must have the following handlers: {self.handler_list}")
+
+    def set_handler(self, handler_type: str, handler: Callable):
+        self.handlers[handler_type] = handler

@@ -1,4 +1,5 @@
 import socket
+import requests
 
 from typing import Dict, Any, Union, Tuple
 
@@ -18,6 +19,18 @@ def get_local_ip() -> str:
         # works even with no internet connection
         sock.connect(("8.8.8.8", 80))
         return sock.getsockname()[0]
+
+
+def get_public_ip() -> str:
+    """Returns the local IP address of this device.
+
+    Returns:
+        str: the ipv4 used by this device.
+    """
+    try:
+        return requests.get("http://ident.me").text
+    except:
+        return "localhost"
 
 
 def check_address(address: str, port: int) -> Tuple[Tuple[str, int], str]:

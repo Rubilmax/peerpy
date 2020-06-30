@@ -3,13 +3,18 @@ import os
 # allow the example to be run without installing the package, from this repository's root directory
 sys.path.append(os.path.abspath(os.path.join('.')))
 
-"""Hello World Example"""
+"""
+Hello World Example
+
+This example is made to be run from 2 separate python shells:
+python examples/hello_world.py
+"""
 from peerpy import Peer
 
 
 def set_connection_handler(connection) -> bool:
     # handler to be executed at connection time (returned value indicates whether to accept or deny the connection)
-    connection.handlers["data"] = lambda data: print(f"Received: {data}")
+    connection.set_handler("data", lambda data: print(f"Received: {data}"))
 
 
 # by default, Peer will find the device's local IP and allocate its own port (in the range of allowed ports)

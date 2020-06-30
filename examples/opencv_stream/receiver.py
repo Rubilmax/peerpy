@@ -3,6 +3,12 @@ import os
 # allow the example to be run without installing the package, from this repository's root directory
 sys.path.append(os.path.abspath(os.path.join('.')))
 
+"""
+OpenCV Stream receiver example
+
+This example is made to be run from one python shell,
+connecting this receiver to a sender broadcasting a stream.
+"""
 import cv2
 import time
 import queue
