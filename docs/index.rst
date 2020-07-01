@@ -34,7 +34,7 @@ Installation
 Source code
 ***********
 
-Please refer to `python sources documentation <src.rst>`_ or `peerpy's github repository <https://github.com/Rubilmax/peerpy>`_.
+Please refer to `python sources documentation <src.html>`_ or `peerpy's github repository <https://github.com/Rubilmax/peerpy>`_.
 
 .. toctree::
    :caption: Table of contents
