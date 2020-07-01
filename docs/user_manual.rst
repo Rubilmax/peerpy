@@ -52,3 +52,33 @@ Peerpy comes with a builtin discovery protocol built over UDP. In the following 
 * Alice sends a *PING* packet to her router's UDP broadcasting IPv4 address, containing her address and listening port: **PING 192.168.0.2:51515**.
 * Bob listens for packets on his router's UDP broadcasting IPv4 address, waiting for *PING* packets. He receives Alice's packet and sends her a *PONG* packet, containing his address and listening port: **PING 192.168.0.3:62626**.
 * Alice receives Bob's *PONG* packet and thus knows that Bob is reachable over the address he shared.
+
+Events & Handlers
+*****************
+
+:code:`Peer` and :code:`Connection` classes both inherits from the :code:`EventHandler` superclass, which allows one to pass event handlers (python callables) which will respectively be called by the peer's listening thread and the connection's main thread upon the corresponding event.
+
+Let's say for example that you want to print your :code:`Peer` object's address and listening port (which is the default behavior). Then you just have to register your handler at your :code:`Peer` instanciation::
+
+   with Peer(handlers={
+      "listen": lambda peer: print(peer.address, peer.address_name)
+   }) as peer:
+
+Here is a table showing every events and handlers possible:
+
++--------------------+--------------------+------------------------------------------------------------------------------------+----------------------------------+
+| Class/Object       | Event              | Description                                                                        | Arguments                        |
++====================+====================+====================================================================================+==================================+
+|                    | :code:`listen`     | Triggered when peer is listening for connections                                   | The listening peer               |
++                    +--------------------+------------------------------------------------------------------------------------+----------------------------------+
+|                    | :code:`offer`      | Triggered when peer has received a connection offer.                               | The connection to accept or deny |
+|                    |                    | This handler must return a boolean indicating whether to accept or deny the offer. |                                  |
++ :code:`Peer`       +--------------------+------------------------------------------------------------------------------------+----------------------------------+
+|                    | :code:`connection` | Triggered when peer has established a new connection                               | The connection established       |
++                    +--------------------+------------------------------------------------------------------------------------+----------------------------------+
+|                    | :code:`stop`       | Triggered when peer has stopped listening for connections                          | The peer that have stopped       |
++--------------------+--------------------+------------------------------------------------------------------------------------+----------------------------------+
+|                    | :code:`data`       | Triggered when connection has received some data                                   | The data received                |
++ :code:`Connection` +--------------------+------------------------------------------------------------------------------------+----------------------------------+
+|                    | :code:`close`      | Triggered when connection has been terminated                                      | The connection terminated        |
++--------------------+--------------------+------------------------------------------------------------------------------------+----------------------------------+

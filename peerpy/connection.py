@@ -166,5 +166,5 @@ class Connection(EventHandler):
                 self.handle("data", data.decode())
 
         self.sock.close()
-        self.handle("stop", self)
+        self.handle("close", self)
         del self.peer.connections[self.target_name]
