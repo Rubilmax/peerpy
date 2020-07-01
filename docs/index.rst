@@ -17,7 +17,7 @@ This module provides a **high-level API** for discovering and connecting multipl
    * sending/answering pings
 
 .. note::
-   This module allows to quickly link the 7th layer (your application) to the 3rd layer (provided by python's :code:`socket` module) of the `OSI model <https://en.wikipedia.org/wiki/OSI_model>`_.
+   This module allows to quickly link the application layer (your application) to the transport layer (provided by python's :code:`socket` module) of the `OSI model <https://en.wikipedia.org/wiki/OSI_model>`_.
 
 What is it made for?
 ********************
@@ -30,6 +30,11 @@ Installation
 ************
 
 :code:`pip install peerpy`
+
+Source code
+***********
+
+Please refer to `python sources documentation <src.rst>`_ or `peerpy's github repository <https://github.com/Rubilmax/peerpy>`_.
 
 .. toctree::
    :caption: Table of contents
