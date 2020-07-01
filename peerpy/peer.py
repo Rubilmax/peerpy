@@ -258,17 +258,16 @@ class Peer(EventHandler):
             bool: whether this offer was accepted or rejected.
         """
         header = split_header(offer_header)
-        # TODO: handle when fields are missing
-        peer_name = header.get("peer_name", "UNKNOWN_PEER")
-        data_type = header.get("data_type", "bytes")
-        strict = header.get("strict", True)
-        stream = header.get("stream", False)
+
+        # don't process header if it does not contains the minimum needed key/values pairs
+        if any([key not in header for key in headers.required_hello_fields]):
+            return False
+
+        peer_name = header["peer_name"]
 
         connection = Connection(
             self, peer_name, sock, self.buffer_size,
-            data_type=data_type,
-            strict=strict,
-            stream=stream
+            **header
         )
 
         if self.handle("offer", connection):

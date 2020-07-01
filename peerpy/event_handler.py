@@ -6,7 +6,7 @@ from .exceptions import HandlerMissingException
 
 @dataclass
 class EventHandler():
-    """Super class instanciate elements that can call event handlers (such as Peer and Connection)."""
+    """Super class that instanciates elements calling event handlers (such as Peer and Connection)."""
 
     handlers: Dict[str, Callable[[Any], Any]]
     handler_list: List[str] = field(default_factory=list)
@@ -28,4 +28,10 @@ class EventHandler():
             raise HandlerMissingException(f"{self.__name__} must have the following handlers: {self.handler_list}")
 
     def set_handler(self, handler_type: str, handler: Callable):
+        """Sets a callable as an event handler.
+
+        Args:
+            handler_type (str): the event name.
+            handler (Callable): the handler to be called when event is triggered.
+        """
         self.handlers[handler_type] = handler

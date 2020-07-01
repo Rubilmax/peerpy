@@ -88,7 +88,7 @@ class Connection(EventHandler):
         header = split_header(header)
 
         # don't process header if it does not contains the minimum needed key/values pairs
-        if "data_type" not in header or "data_size" not in header:
+        if any([key not in header for key in headers.required_data_fields]):
             return None
 
         data_type, data_size = header["data_type"], header["data_size"]
