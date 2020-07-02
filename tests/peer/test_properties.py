@@ -20,7 +20,6 @@ def peers():
 def test_stop(peers):
     """Tests the instanciation, properties and asynchronous stop of a peer"""
     assert peers[0].server_thread.is_alive()
-
     assert peers[0].address == ("127.0.0.1", 11111)
     assert peers[0].address_name == "127.0.0.1:11111"
     assert peers[0].timeout == 1.576
@@ -49,6 +48,7 @@ def test_invisibility_property(peers):
 
 
 def test_timeout(peers):
+    """Tests the timeout property of a peer"""
     peers[0].timeout = .1
 
     assert peers[0].timeout == .1

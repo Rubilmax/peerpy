@@ -319,7 +319,7 @@ class Peer(EventHandler):
 
         while self._server_active:
             if len(self.connections) >= self.max_connections > 0:
-                time.sleep(1)
+                time.sleep(self.timeout)
                 continue
 
             try:

@@ -20,6 +20,7 @@ def test_connect_successful(peers):
 
 
 def test_disconnect(peers):
+    """Tests the disconnection of a peer and its detection from the other peer"""
     connection = peers[0].connect(peers[1].address)
     connection_ = peers[1].connections[peers[0].address_name]
 
@@ -36,7 +37,7 @@ def test_disconnect(peers):
 
 
 def test_connect_fails(peers):
-    """Tests the connection of a peer to another"""
+    """Tests the failing connection of a peer to another"""
     connection = peers[0].connect(peers[0].address)
 
     assert not connection
