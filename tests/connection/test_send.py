@@ -6,7 +6,7 @@ from ..utils import with_peers
 @pytest.fixture
 @with_peers
 def peers():
-    return [{}, {}]
+    return [{}] * 2
 
 
 def test_send_large(peers):

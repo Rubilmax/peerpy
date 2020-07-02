@@ -66,19 +66,22 @@ Let's say for example that you want to print your :code:`Peer` object's address 
 
 Here is a table showing every events and handlers possible:
 
+.. versionchanged:: 1.2.0
+   Whenever a handler is called, the first argument is now the event emitter.
+
 +--------------------+--------------------+------------------------------------------------------------------------------------+----------------------------------+
-| Class/Object       | Event              | Description                                                                        | Arguments                        |
+| Emitter            | Event              | Description                                                                        | Additional arguments             |
 +====================+====================+====================================================================================+==================================+
-|                    | :code:`listen`     | Triggered when peer is listening for connections                                   | The listening peer               |
+|                    | :code:`listen`     | Triggered when peer is listening for connections                                   |                                  |
 +                    +--------------------+------------------------------------------------------------------------------------+----------------------------------+
 |                    | :code:`offer`      | Triggered when peer has received a connection offer.                               | The connection to accept or deny |
 |                    |                    | This handler must return a boolean indicating whether to accept or deny the offer. |                                  |
 + :code:`Peer`       +--------------------+------------------------------------------------------------------------------------+----------------------------------+
 |                    | :code:`connection` | Triggered when peer has established a new connection                               | The connection established       |
 +                    +--------------------+------------------------------------------------------------------------------------+----------------------------------+
-|                    | :code:`stop`       | Triggered when peer has stopped listening for connections                          | The peer that have stopped       |
+|                    | :code:`stop`       | Triggered when peer has stopped listening for connections                          |                                  |
 +--------------------+--------------------+------------------------------------------------------------------------------------+----------------------------------+
 |                    | :code:`data`       | Triggered when connection has received some data                                   | The data received                |
 + :code:`Connection` +--------------------+------------------------------------------------------------------------------------+----------------------------------+
-|                    | :code:`close`      | Triggered when connection has been terminated                                      | The connection terminated        |
+|                    | :code:`close`      | Triggered when connection has been terminated                                      |                                  |
 +--------------------+--------------------+------------------------------------------------------------------------------------+----------------------------------+

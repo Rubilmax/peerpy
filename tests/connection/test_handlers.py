@@ -10,8 +10,8 @@ data_test = "2easy4u"
 @pytest.fixture
 @with_peers
 def peers():
-    def set_connection_handler(connection):
-        def check_data(data):
+    def set_connection_handler(peer, connection):
+        def check_data(connection, data):
             assert data == data_test
 
         connection.handlers["data"] = check_data

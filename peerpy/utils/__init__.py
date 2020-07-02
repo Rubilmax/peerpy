@@ -147,14 +147,13 @@ def split_header(header: str) -> Dict[str, Union[str, int]]:
         header = header.split(headers.separator)[1]
 
     values = {}
-    if headers.values_separator in header:
-        for part in header.split(headers.values_separator):
-            key, value = part.split(headers.key_separator)
+    for part in header.split(headers.values_separator):
+        key, value = part.split(headers.key_separator)
 
-            # convert data type if necessary
-            if key in headers.data_types_parsers:
-                value = headers.data_types_parsers[key](value)
+        # convert data type if necessary
+        if key in headers.data_types_parsers:
+            value = headers.data_types_parsers[key](value)
 
-            values[key] = value
+        values[key] = value
 
     return values

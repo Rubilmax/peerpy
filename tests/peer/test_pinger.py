@@ -6,7 +6,7 @@ from ..utils import with_peers
 @pytest.fixture
 @with_peers
 def peers():
-    return [{} for _ in range(10)]
+    return [{}] * 10
 
 
 def test_ping_large_network(peers):

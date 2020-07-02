@@ -11,8 +11,13 @@ python examples/hello_world.py
 """
 from peerpy import Peer, protocol
 
+
+def print_message(connection, message):
+    print(f"{connection.target_name}: {message}")
+
+
 # by default, whenever a message is received from a connection, print it
-protocol.defaults.connection_handlers["data"] = lambda message: print(f"{connection.target_name}: {message}")
+protocol.defaults.connection_handlers["data"] = print_message
 
 
 # by default, Peer will find the device's local IP and allocate its own port (in the range of allowed ports)
@@ -25,6 +30,7 @@ with Peer(timeout=1) as peer:
         while True:
             message = input("")
             print(f"{peer.address_name}: {message}")
-            connection.send(message)
+            if not connection.send(message):
+                print("Chat message couldn't be delivered!")
     else:
         print("Connection couldn't be established!")

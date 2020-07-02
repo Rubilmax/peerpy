@@ -14,6 +14,8 @@ class Headers():
     hello_header: str = "HELLO"
     accept_header: str = "ACCEPT"
     deny_header: str = "DENY"
+    ping_header: str = "PING"
+    pong_header: str = "PONG"
 
     data_types_parsers: Dict[str, Callable] = field(default_factory=dict)
     required_hello_fields: List[str] = field(default_factory=list)
@@ -41,6 +43,6 @@ headers = Headers(
 )
 defaults = Defaults(peer_handlers={
     "listen": lambda peer: print(f"Peer listening for connections on {peer.address_name}!"),
-    "offer": lambda connection: True,
+    "offer": lambda peer, connection: True,
     "stop": lambda peer: print(f"Peer ({peer.address_name}) stopped!")
 })

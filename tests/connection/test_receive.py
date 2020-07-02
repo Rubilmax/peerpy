@@ -11,8 +11,8 @@ datas = []
 def peers():
     datas.clear()
 
-    def set_connection_handler(connection):
-        connection.handlers["data"] = lambda data: datas.append(data)
+    def set_connection_handler(peer, connection):
+        connection.handlers["data"] = lambda connection, data: datas.append(data)
         return True
 
     peer_adder_args = {

@@ -4,7 +4,7 @@ from typing import Any
 
 from .data import Data
 from .event_handler import EventHandler
-from .utils import valid_data_types, build_data_header, split_header
+from .utils import valid_data_types, build_data_header, split_header, build_header
 from .protocol import headers, defaults
 from .exceptions import DataSizeError
 
@@ -22,7 +22,7 @@ class Connection(EventHandler):
             raise ValueError(f"Data size should be > 0 or 'auto' (Received {data_size})!")
 
         handlers = {**defaults.connection_handlers, **dict(kwargs.get("handlers", {}))}
-        super().__init__(handlers)
+        super().__init__(["data", "close"], handlers)
 
         self.peer = peer
         self.target_name = str(target_name)
@@ -37,10 +37,25 @@ class Connection(EventHandler):
         self.thread = threading.Thread(target=self._listen)
 
     @property
-    def data_type(self):
+    def data_type(self) -> str:
+        """Returns the data type each peers have agreed on for this connection.
+
+        Returns:
+            str: the string representation of the data type
+        """
         return self._data_type
 
+    @property
+    def closed(self) -> bool:
+        """Returns whether this connection is closed.
+
+        Returns:
+            bool: a boolean indicating whether the connection is closed.
+        """
+        return not self.active
+
     def start_thread(self):
+        """Attempts to start this connection's main thread, if not already running."""
         if not self.thread.is_alive():
             self.thread.start()
 
@@ -48,11 +63,21 @@ class Connection(EventHandler):
         """Send data to the target peer, serializing it to this connection's default data format.
 
         Args:
-            data (Any): the data to serialize and send
+            data (Any): the data to serialize and send.
 
         Raises:
             ValueError: if this connection's default format is bytes and the data is not bytes
+
+        Returns:
+            bool: whether data was successfully sent.
         """
+        if self.closed:
+            # raise ConnectionAbortedError("Connection was lost with remote peer.")
+            # choice was made not to raise exception here because the user needs to properly handle
+            # disconnection with event handlers. We'd keep returning False if the user keeps trying
+            # to send data over a defective connection
+            return False
+
         # send a header if the connection is not streaming
         # otherwise, data_type is fixed and known and data is of fixed size so header is useless
         # first encode data according to this connection's default data type
@@ -62,7 +87,11 @@ class Connection(EventHandler):
         if not self.stream or self.data_size == "auto":
             # then send information about data
             header = build_data_header(data_size, self.data_type)
-            self.sock.sendall(header)
+            try:
+                self.sock.sendall(header)
+            except (ConnectionAbortedError, ConnectionResetError):
+                self.close()
+                return False
 
             if self.data_size == "auto":
                 self.data_size = data_size
@@ -71,10 +100,15 @@ class Connection(EventHandler):
 
         # set the socket as blocking so that we wait for the data to be received
         self.sock.setblocking(True)
-        self.sock.sendall(data)  # raises an error if data ain't fully sent
+        try:
+            self.sock.sendall(data)  # raises an error if data ain't fully sent
+        except (ConnectionAbortedError, ConnectionResetError):
+            self.close()
+            return False
 
         # reset the socket timeout
         self.sock.settimeout(self.peer.timeout)
+        return True
 
     def _receive_data(self, header: str):
         """Internal method to start the receiving process
@@ -97,8 +131,6 @@ class Connection(EventHandler):
             self.data_size = data_size
 
         if self.strict and data_type != self.data_type:
-            self.peer.logger.warning(
-                f"Data type received is not complying with data type established at connection: {data_type} != {self.data_type}")
             return None
 
         return self._receive(data_size, data_type)
@@ -118,10 +150,15 @@ class Connection(EventHandler):
         nb_chunks = data_size // self.buffer_size
         residue_size = data_size % self.buffer_size
 
-        for _ in range(nb_chunks):
-            data.buffer += self.sock.recv(self.buffer_size)
-        if residue_size > 0:
-            data.buffer += self.sock.recv(residue_size)
+        # TODO: set socket blocking?
+        try:
+            for _ in range(nb_chunks):
+                data.buffer += self.sock.recv(self.buffer_size)
+            if residue_size > 0:
+                data.buffer += self.sock.recv(residue_size)
+        except (ConnectionAbortedError, ConnectionResetError):
+            self.close()
+            return None
 
         return data
 
@@ -133,10 +170,14 @@ class Connection(EventHandler):
             This setting should be considered dangerous, as data can be lost. Defaults to False.
         """
         self.active = False
-        self.sock.settimeout(0)  # try to speed up closing process
+        try:
+            self.sock.settimeout(0)  # try to speed up closing process
 
-        if force:
-            self.sock.shutdown(socket.SHUT_RDWR)
+            if force:
+                self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            # in case the socket was already termianted, an OSError is raised
+            return
 
     def _listen(self):
         while self.active:
@@ -151,12 +192,17 @@ class Connection(EventHandler):
                     data = self._receive(self.data_size, self.data_type)
                 else:
                     header = self.sock.recv(headers.size).decode("utf-8")
-            except socket.timeout:
-                # no header/streaming data received within timeout seconds
+            except (socket.timeout, UnicodeDecodeError):
+                # socket.timeout: no header/streaming data received within timeout seconds
+                # UnicodeDecodeError: data received is corrupted, don't process it
+
+                # ping the connection to check if it is still alive
+                # which otherwise raises ConnectionAbortedError, ConnectionResetError
+                self.sock.sendall(build_header(headers.ping_header, {}))
                 continue
-            except UnicodeDecodeError:
-                # data received is corrupted, don't process it
-                return False
+            except (ConnectionAbortedError, ConnectionResetError):
+                self.close()
+                continue
 
             # if we received a data header, otherwise do nothing with the received packet
             if header is not None and header.startswith(headers.data_header):
@@ -166,5 +212,5 @@ class Connection(EventHandler):
                 self.handle("data", data.decode())
 
         self.sock.close()
-        self.handle("close", self)
+        self.handle("close")
         del self.peer.connections[self.target_name]

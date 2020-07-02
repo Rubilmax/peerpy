@@ -1,7 +1,6 @@
 import time
 
 import socket
-import logging
 import threading
 
 from typing import Tuple, List, Any, Dict
@@ -17,7 +16,7 @@ class Peer(EventHandler):
 
     def __init__(self, address: str = None, port: int = 0, **kwargs):
         handlers = {**defaults.peer_handlers, **dict(kwargs.get("handlers", {}))}
-        super().__init__(handlers)
+        super().__init__(["listen", "offer", "connection", "stop"], handlers)
 
         if address is None:
             address = get_local_ip()
@@ -33,7 +32,6 @@ class Peer(EventHandler):
         self.connections = {}
         self._server_active = False
         self.max_connections = int(kwargs.get("max_connections", 0))
-        self.logger = logging.getLogger(f"[{self.address_name}]")
         self.buffer_size = float(kwargs.get("buffer_size", defaults.buffer_size))
 
         self.server_thread = threading.Thread(target=self._listen_offers)
@@ -97,6 +95,7 @@ class Peer(EventHandler):
 
         # if this peer's now visible and the pinger thread is stopped, restart it
         if self._server_active and not invisible and not self.pinger_thread.is_alive():
+            self.pinger_thread = threading.Thread(target=self._listen_pings)
             self.pinger_thread.start()
 
     def connect(self, address: str, port: int = None, data_type: str = "json", strict: bool = True, **kwargs) -> Connection:
@@ -150,15 +149,13 @@ class Peer(EventHandler):
             strict,
             stream=connection.stream
         )
-        sock.sendall(header)
 
         try:
+            sock.sendall(header)
             header = sock.recv(headers.size).decode("utf-8")
-        except socket.timeout:
+        except (socket.timeout, ConnectionAbortedError, UnicodeDecodeError):
+            # UnicodeDecodeError: data received is corrupted, don't process it
             sock.close()
-            return False
-        except UnicodeDecodeError:
-            # data received is corrupted, don't process it
             return False
 
         # only check if header is ACCEPT, otherwise cancel connection
@@ -185,23 +182,23 @@ class Peer(EventHandler):
 
             sock.bind((get_local_ip(), 1024))
 
-            self.logger.debug(f"Pinging local network...")
-
             address, port = sock.getsockname()
-            sock.sendto(f"PING {address}:{port}".encode("utf-8"), ("<broadcast>", 1024))
+            ping_header = build_header(headers.ping_header, {"pinger": f"{address}:{port}"})
+            sock.sendto(ping_header, ("<broadcast>", 1024))
 
             addresses = []
             while True:
                 try:
-                    data = sock.recv(512).decode("utf-8")
-                except socket.timeout:
+                    pong_header = sock.recv(headers.size).decode("utf-8")
+                except (socket.timeout, UnicodeDecodeError):
+                    # UnicodeDecodeError: data received is corrupted, don't process it
                     break
 
-                if "PONG" in data:
-                    address_name = data.split(" ")[1]
-                    if address_name != self.address_name:
-                        self.logger.debug(f"Received pong from {address_name}!")
-                        addresses.append(address_name)
+                if pong_header.startswith(headers.pong_header):
+                    pong_header = split_header(pong_header)
+
+                    if pong_header["ponger"] != self.address_name:
+                        addresses.append(pong_header["ponger"])
 
         return addresses
 
@@ -270,18 +267,22 @@ class Peer(EventHandler):
             **header
         )
 
-        if self.handle("offer", connection):
-            accept = build_header(headers.accept_header, {})
-            sock.sendall(accept)
+        try:
+            if self.handle("offer", connection):
+                accept = build_header(headers.accept_header, {})
+                sock.sendall(accept)
 
-            self.connections[peer_name] = connection
-            connection.start_thread()
+                self.connections[peer_name] = connection
+                connection.start_thread()
 
-            self.handle("connection", connection)
-            return True
-        else:
-            deny = build_header(headers.deny_header, {})
-            sock.sendall(deny)
+                self.handle("connection", connection)
+                return True
+            else:
+                deny = build_header(headers.deny_header, {})
+                sock.sendall(deny)
+        except ConnectionAbortedError:
+            # sock.sendall raised ConnectionAbortedError: connection is lost
+            pass
 
         sock.close()
         return False
@@ -298,22 +299,23 @@ class Peer(EventHandler):
 
             while self._server_active and not self.invisible:
                 try:
-                    data = pinger.recv(512).decode("utf-8")
-                except socket.timeout:
+                    ping_header = pinger.recv(512).decode("utf-8")
+                except (socket.timeout, UnicodeDecodeError):
+                    # UnicodeDecodeError: data received is corrupted, don't process it
                     continue
 
-                if "PING" in data and not self.invisible:  # in case this peer's visibility changed within the timeout window
-                    address_name = data.split(" ")[1]
+                # in case this peer's visibility changed within the timeout window
+                if ping_header.startswith(headers.ping_header) and not self.invisible:
+                    ping_header = split_header(ping_header)
+                    address, port = ping_header["pinger"].split(":")
 
-                    self.logger.debug(f"Received ping from {address_name}!")
-
-                    address, port = address_name.split(":")
-                    pinger.sendto(f"PONG {self.address_name}".encode("utf-8"), (address, int(port)))
+                    pong_header = build_header(headers.pong_header, {"ponger": self.address_name})
+                    pinger.sendto(pong_header, (address, int(port)))
 
     def _listen_offers(self):
         """Starts this peer's server, used to listen for connection requests."""
         self.server.listen()
-        self.handle("listen", self)
+        self.handle("listen")
 
         while self._server_active:
             if len(self.connections) >= self.max_connections > 0:
@@ -328,24 +330,21 @@ class Peer(EventHandler):
                 continue
 
             sock.settimeout(self.timeout)
-            self.logger.debug(f"Received offer from {peer_address}...")
 
             try:
                 # will block until a hello header is received
                 header = sock.recv(headers.size).decode("utf-8")
-            except socket.timeout:
-                # no offer received within timeout seconds, we cancel the connection
-                sock.close()
-                continue
-            except UnicodeDecodeError:
+            except (socket.timeout, UnicodeDecodeError, ConnectionAbortedError):
+                # socket.timeout: no offer received within timeout seconds, we cancel the connection
                 # data received is corrupted, don't process it
+                sock.close()
                 continue
 
             if header.startswith(headers.hello_header):
                 self._handle_offer(header, sock)
 
         self.server.close()
-        self.handle("stop", self)
+        self.handle("stop")
 
     def __enter__(self):
         self.start()
